@@ -471,23 +471,59 @@ const SUPABASE_URL = "https://azpgqktbjnaxxidsmtyg.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_KsvNM8hF_Mtcz3BZHbecOQ__wQkHBrF";
 const NOME_TABELA = "cartas_cce";
 
-const supabaseConfigurado = !SUPABASE_URL.includes("COLE_AQUI") && !SUPABASE_ANON_KEY.includes("COLE_AQUI");
+let supabaseConfigurado = !SUPABASE_URL.includes("COLE_AQUI") && !SUPABASE_ANON_KEY.includes("COLE_AQUI");
 let supabaseClient = null;
-if (supabaseConfigurado) {
-  supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-} else {
-  document.getElementById("aviso-config").style.display = "block";
+
+// Mostra qualquer erro em vermelho no topo da página.
+function mostrarErroNaTela(msg) {
+  const el = document.getElementById("aviso-config");
+  el.style.display = "block";
+  el.innerHTML = "⚠️ <strong>Erro:</strong> " + escapeHtml(msg);
+}
+window.addEventListener("error", e => mostrarErroNaTela(e.message));
+window.addEventListener("unhandledrejection", e =>
+  mostrarErroNaTela(String((e.reason && e.reason.message) || e.reason)));
+
+// "Failed to fetch" significa que o navegador nem conseguiu falar com o
+// servidor do Supabase. Traduzimos para uma mensagem que diz o que fazer.
+function explicarErroRede(e) {
+  const msg = (e && e.message) || String(e);
+  if (/failed to fetch|networkerror|load failed/i.test(msg)) {
+    return "Sem conexão com o Supabase (" + msg + "). Causas mais comuns: " +
+      "1) o projeto foi PAUSADO por inatividade — entre no painel do Supabase e clique em \"Restore project\"; " +
+      "2) a rede da empresa (firewall/proxy) ou um bloqueador de anúncios está bloqueando *.supabase.co; " +
+      "3) sem internet no momento.";
+  }
+  return msg;
 }
 
-// worker do pdf.js (mesma versão fixada acima)
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+// pdf.js — independente do Supabase
+try {
+  if (typeof pdfjsLib === "undefined")
+    throw new Error("A biblioteca pdf.js não carregou (sem internet ou CDN bloqueado).");
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+} catch (e) { mostrarErroNaTela(e.message); }
 
-// Cores padrão do Chart.js: por padrão vêm escuras (feitas para fundo claro)
-// e ficariam invisíveis sobre os cartões escuros do painel. Ajustamos aqui
-// uma vez só, para todos os gráficos.
-Chart.defaults.color = "#8ea2bd";
-Chart.defaults.borderColor = "rgba(255,255,255,0.08)";
+// Supabase — se falhar, o leitor de PDF continua funcionando
+try {
+  if (!supabaseConfigurado) {
+    document.getElementById("aviso-config").style.display = "block";
+  } else if (!window.supabase) {
+    throw new Error("A biblioteca do Supabase não carregou (CDN jsdelivr bloqueado?).");
+  } else {
+    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  }
+} catch (e) {
+  supabaseConfigurado = false;
+  mostrarErroNaTela("Supabase: " + e.message);
+}
+
+// Cores do Chart.js para fundo escuro — não pode travar o resto da página.
+try {
+  Chart.defaults.color = "#8ea2bd";
+  Chart.defaults.borderColor = "rgba(255,255,255,0.08)";
+} catch (e) { console.warn("Chart.js não carregou:", e); }
 
 /* ==========================================================================
    NAVEGAÇÃO ENTRE AS DUAS TELAS
@@ -573,6 +609,10 @@ async function lerPdf(arquivo) {
       });
   }
   linhas = linhas.filter(l => l.length > 0);
+  if (linhas.length === 0) {
+    throw new Error("o PDF não tem texto selecionável — provavelmente é digitalizado (imagem) e precisaria de OCR.");
+  }
+  console.log("Texto lido de", arquivo.name, linhas);
 
   return extrairCamposCCe(linhas, arquivo.name);
 }
@@ -798,7 +838,7 @@ async function registrarSelecionadas() {
           registros[i].statusMsg = "Já existe uma carta registrada com essa chave de acesso.";
         } else {
           registros[i].status = "erro";
-          registros[i].statusMsg = error.message;
+          registros[i].statusMsg = explicarErroRede(error);
         }
       } else {
         registros[i].status = "sucesso";
@@ -806,7 +846,7 @@ async function registrarSelecionadas() {
       }
     } catch (e) {
       registros[i].status = "erro";
-      registros[i].statusMsg = e.message;
+      registros[i].statusMsg = explicarErroRede(e);
     }
     renderizarTabela();
   }
@@ -850,7 +890,7 @@ async function carregarDashboard() {
     document.getElementById("dashboard-conteudo").style.display = "block";
   } catch (e) {
     document.getElementById("dashboard-carregando").textContent =
-      "Não foi possível carregar os dados: " + e.message;
+      "Não foi possível carregar os dados: " + explicarErroRede(e);
   }
 }
 
