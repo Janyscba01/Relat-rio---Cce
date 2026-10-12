@@ -1,0 +1,31 @@
+name: Manter Supabase ativo
+
+# Faz uma consulta leve ao Supabase a cada 3 dias para o projeto
+# gratuito não ser pausado por inatividade (o limite é 7 dias).
+on:
+  schedule:
+    - cron: "17 12 */3 * *"   # a cada 3 dias, por volta de 09:17 (horário de Brasília)
+  workflow_dispatch:           # permite rodar manualmente na aba Actions
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Consultar a tabela cartas_cce
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "Faltam os secrets SUPABASE_URL e/ou SUPABASE_ANON_KEY."
+            exit 1
+          fi
+          STATUS=$(curl -s -o resposta.txt -w "%{http_code}" \
+            "$SUPABASE_URL/rest/v1/cartas_cce?select=chave_acesso&limit=1" \
+            -H "apikey: $SUPABASE_ANON_KEY")
+          echo "Resposta do Supabase: HTTP $STATUS"
+          cat resposta.txt; echo
+          if [ "$STATUS" -ge 400 ] || [ "$STATUS" -eq 0 ]; then
+            echo "O Supabase não respondeu corretamente."
+            exit 1
+          fi
